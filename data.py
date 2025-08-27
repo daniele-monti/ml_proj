@@ -31,7 +31,7 @@ white = pd.read_csv("winequality-white.csv", sep=";")
 
 wines = pd.concat([red, white], ignore_index=True)
 
-wines_discrete_quality = wines
+wines_discrete_quality = wines.copy(deep=True)
 wines[label] = wines[label].apply(to_binary_class)
 
 # 80 - 20 split for train+dev - test sets
