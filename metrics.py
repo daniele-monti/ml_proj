@@ -1,8 +1,22 @@
 import pandas as pd
 import numpy as np
-from models import Model, SVM
+from models import Model, SVM, LogReg
 from data import GOOD, BAD
 
+def z_score_scale(X: pd.DataFrame):
+    return X.apply(lambda feature: (feature - feature.mean()) / feature.std())
+
+def log_scaling(X: pd.DataFrame):
+    return X.apply(lambda x: np.log(x))
+
+def z_score_scale_single(features: np.ndarray):
+    return (features - features.mean()) / features.std()
+
+def z_score_scale_array(dataset: np.ndarray):
+    scaled = np.zeros_like(dataset, dtype=np.float32)
+    for i, datapoint in enumerate(dataset):
+        scaled[i] = z_score_scale_single(datapoint)
+    return scaled
 
 def evaluation_metrics(truth, prediction):
     total = len(truth)
@@ -14,7 +28,7 @@ def evaluation_metrics(truth, prediction):
     true_negatives = 0
     false_negatives = 0
 
-    for index in range(truth.size):
+    for index in range(total):
         t = truth[index]
         p = prediction[index]
         if p == GOOD and t == GOOD:
@@ -97,14 +111,16 @@ def k_fold_CV(k, model: Model, X, Y):
     )
 
     for i in range(k):
+        print(f"fold number {i}")
         train_x = np.concat(folds_x[0:i] + folds_x[i+1:k])
         train_y = np.concat(folds_y[0:i] + folds_y[i+1:k])
-        print(f"train x -> {len(train_x)}, train y -> {len(train_y)}")
+        train_x = z_score_scale_array(train_x)
         model.fit(train_x, train_y)
 
         test_x = folds_x[i]
         test_y = folds_y[i]
-        print(f"test x -> {len(test_x)}, test y -> {len(test_y)}")
+
+        test_x = z_score_scale_array(test_x)
         pred = model.predict(test_x)
 
         fold_metrics = evaluation_metrics(test_y, pred)
@@ -119,5 +135,44 @@ def k_fold_CV(k, model: Model, X, Y):
 
 from data import wines, train, dev, test, features, label
 
-print(k_fold_CV(5, SVM(iterations=1000000, lambda_par=0.74), wines[features].to_numpy(), wines[label].to_numpy()))
+#print(k_fold_CV(5, SVM(iterations=100000, lambda_par=0.74), wines[features].to_numpy(), wines[label].to_numpy()))
+#print(k_fold_CV(5, LogReg(iterations=100000, lambda_par=1), wines[features].to_numpy(), wines[label].to_numpy()))
 
+
+train_x = z_score_scale_array(train[features].to_numpy())
+test_x = z_score_scale_array(test[features].to_numpy())
+
+train_y = train[label].to_numpy()
+test_y = test[label].to_numpy()
+
+svm = SVM()
+svm.fit(train_x, train_y)
+
+pred = svm.predict(test_x)
+print(evaluation_metrics(test_y, pred))
+
+pred = svm.predict(train_x)
+print(evaluation_metrics(train_y, pred))
+
+#logreg = LogReg(iterations=5)
+#logreg.fit(x_train, y_train)
+
+
+from sklearn.datasets import load_breast_cancer
+
+def to_minus_one_one(x):
+    return 2*x - 1
+
+X, Y = load_breast_cancer(return_X_y=True)
+Y = to_minus_one_one(Y)
+
+def split(X, Y, ratio):
+    total = len(Y)
+    breakpoint = np.floor(ratio * total)
+    return X[:breakpoint], X[breakpoint:], Y[:breakpoint], Y[:breakpoint]
+
+#train_x, test_x, train_y, test_y = split(X, Y, 0.8)
+
+#svm = SVM()
+#print(k_fold_CV(5, SVM(iterations=1000000, lambda_par=0.0001), X, Y))
+print(k_fold_CV(5, LogReg(iterations=1000000, lambda_par=0.0045), X, Y))
