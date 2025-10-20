@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 
 GOOD = 1
 BAD = -1

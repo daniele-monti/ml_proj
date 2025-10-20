@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from models import Model, SVM, LogReg
+from models import Model
 from data import GOOD, BAD
 
 def z_score_scale(X: pd.DataFrame):
@@ -18,27 +18,35 @@ def z_score_scale_array(dataset: np.ndarray):
         scaled[i] = z_score_scale_single(datapoint)
     return scaled
 
-def evaluation_metrics(truth, prediction):
-    total = len(truth)
-    support_good = len(truth[truth == GOOD])
-    support_bad = len(truth[truth == BAD])
 
-    true_positives = 0
-    false_positives = 0
-    true_negatives = 0
-    false_negatives = 0
+def confusion_mat(truth, prediction):
+    mat = np.zeros(shape=(2, 2), dtype=np.int32)
+    total = len(truth)
 
     for index in range(total):
         t = truth[index]
         p = prediction[index]
         if p == GOOD and t == GOOD:
-            true_positives += 1
+            mat[0][0] += 1
         if p == GOOD and t == BAD:
-            false_positives += 1
-        if p == BAD and t == BAD:
-            true_negatives += 1
+            mat[1][0] += 1
         if p == BAD and t == GOOD:
-            false_negatives += 1
+            mat[0][1] += 1
+        if p == BAD and t == BAD:
+            mat[1][1] += 1
+    return mat
+
+
+def evaluation_metrics(truth, prediction):
+    total = len(truth)
+    support_good = len(truth[truth == GOOD])
+    support_bad = len(truth[truth == BAD])
+
+    conf = confusion_mat(truth, prediction)
+    true_positives = conf[0][0]
+    false_negatives = conf[0][1]
+    false_positives = conf[1][0]
+    true_negatives = conf[1][1]
 
     accuracy = (true_positives + true_negatives) / total
     precision_good = np.nan
@@ -74,14 +82,16 @@ def evaluation_metrics(truth, prediction):
     except ZeroDivisionError:
         pass
 
-    return pd.DataFrame(
-        {
-            "precision": [precision_good, precision_bad, np.nan],
-            "recall": [recall_good, recall_bad, np.nan],
-            "f1_score": [f1_score_good, f1_score_bad, accuracy],
-            "support": [support_good, support_bad, total]
-        },
-        index=[GOOD, BAD, 'accuracy']
+    return (conf, 
+            pd.DataFrame(
+            {
+                "precision": [precision_good, precision_bad, np.nan],
+                "recall": [recall_good, recall_bad, np.nan],
+                "f1_score": [f1_score_good, f1_score_bad, accuracy],
+                "support": [support_good, support_bad, total]
+            },
+            index=[GOOD, BAD, 'accuracy']
+            )
     )
 
 
@@ -123,7 +133,7 @@ def k_fold_CV(k, model: Model, X, Y):
         test_x = z_score_scale_array(test_x)
         pred = model.predict(test_x)
 
-        fold_metrics = evaluation_metrics(test_y, pred)
+        _, fold_metrics = evaluation_metrics(test_y, pred)
         print(fold_metrics)
         print()
         metrics = metrics.add(fold_metrics, fill_value=0.0)
@@ -132,47 +142,22 @@ def k_fold_CV(k, model: Model, X, Y):
     return metrics.div(k)
 
 
+def train(model: Model, train_x, train_y, test_x, test_y):
+    train_x = z_score_scale_array(train_x)
+    test_x = z_score_scale_array(test_x)
 
-from data import wines, train, dev, test, features, label
+    model.fit(train_x, train_y)
 
-#print(k_fold_CV(5, SVM(iterations=100000, lambda_par=0.74), wines[features].to_numpy(), wines[label].to_numpy()))
-#print(k_fold_CV(5, LogReg(iterations=100000, lambda_par=1), wines[features].to_numpy(), wines[label].to_numpy()))
+    pred = model.predict(test_x)
+    conf, metrics = evaluation_metrics(test_y, pred)
+    print("test set performance")
+    print(conf)
+    print(metrics)
+    print()
 
-
-train_x = z_score_scale_array(train[features].to_numpy())
-test_x = z_score_scale_array(test[features].to_numpy())
-
-train_y = train[label].to_numpy()
-test_y = test[label].to_numpy()
-
-svm = SVM()
-svm.fit(train_x, train_y)
-
-pred = svm.predict(test_x)
-print(evaluation_metrics(test_y, pred))
-
-pred = svm.predict(train_x)
-print(evaluation_metrics(train_y, pred))
-
-#logreg = LogReg(iterations=5)
-#logreg.fit(x_train, y_train)
-
-
-from sklearn.datasets import load_breast_cancer
-
-def to_minus_one_one(x):
-    return 2*x - 1
-
-X, Y = load_breast_cancer(return_X_y=True)
-Y = to_minus_one_one(Y)
-
-def split(X, Y, ratio):
-    total = len(Y)
-    breakpoint = np.floor(ratio * total)
-    return X[:breakpoint], X[breakpoint:], Y[:breakpoint], Y[:breakpoint]
-
-#train_x, test_x, train_y, test_y = split(X, Y, 0.8)
-
-#svm = SVM()
-#print(k_fold_CV(5, SVM(iterations=1000000, lambda_par=0.0001), X, Y))
-print(k_fold_CV(5, LogReg(iterations=1000000, lambda_par=0.0045), X, Y))
+    pred = model.predict(train_x)
+    conf, metrics = evaluation_metrics(train_y, pred)
+    print("train set performance")
+    print(conf)
+    print(metrics)
+    print()
