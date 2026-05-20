@@ -32,14 +32,29 @@ def clip_outliers(df: pd.DataFrame, columns=None, kind='iqr'):
         return ret
 
 
+class Scaler():
+    def __init__(self, df: pd.DataFrame, columns=None):
+        self.columns = df.columns if columns is None else columns
+        self.max = df[self.columns].max()
+        self.min = df[self.columns].min()
+    
+    def _scale_column(self, feature: pd.Series):
+        min = self.min[feature.name]
+        max = self.max[feature.name]
+        return (feature - min) / (max - min)
+
+    def scale(self, df: pd.DataFrame):
+        scaled = pd.DataFrame(columns=df.columns)
+        scaled[self.columns] = df[self.columns].apply(self._scale_column)
+        diff = df.columns.difference(self.columns)
+        if not diff.empty:
+            scaled[diff] = df[diff]
+        return scaled
+
 def scale(df: pd.DataFrame, columns=None):
-    if columns is None:
-        return df.apply(lambda feature: (feature - feature.min()) / (feature.max() - feature.min()))
-    else:
-        ret = pd.DataFrame(
-            data=df[columns].apply(lambda feature: (feature - feature.min()) / (feature.max() - feature.min())),
-            columns=df.columns
-        )
-        diff = df.columns.difference(columns) 
-        ret[diff] = df[diff] 
-        return ret
+    scaled = pd.DataFrame(columns=df.columns)
+    scaled[columns] = df[columns].apply(lambda feature: (feature - feature.min()) / (feature.max() - feature.min()))
+    diff = df.columns.difference(columns)
+    if not diff.empty:
+        scaled[diff] = df[diff]
+    return scaled
