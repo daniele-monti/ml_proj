@@ -23,11 +23,11 @@ class Polynomial(Kernel):
 
 class KernelFactory:
     def get_kernel(name, **params):
-        if name is "linear":
+        if name == "linear":
             return Linear()
-        if name is "rbf":
+        if name == "rbf":
             return Gaussian(params['gamma'])
-        if name is "poly":
+        if name == "poly":
             return Polynomial(params["degree"])
 
 
@@ -39,25 +39,33 @@ class Model:
 
 
 class SVM(Model):
-    def __init__(self, iterations=None, lambda_par=0.001, kernel="linear", **kernel_params):
-        self.alpha = None
+    def __init__(self, iterations=None, eps=0.0001, lambda_par=0.001, kernel="linear", **kernel_params):
+        self.w = None
         self.bias = None
         self._lambda = lambda_par
         self.T = iterations
-        self._kernel = KernelFactory.get_kernel(kernel, kernel_params)
+        self._kernel = KernelFactory.get_kernel(kernel, **kernel_params)
 
     def _gradient(self, x, y):
         w = self._lambda * self.w
         bias = 0.0
-        if 1 - y * (np.dot(self.w, x) + bias) > 0:
-            w += -y*x
-            bias += -y
+        if y * (np.dot(self.w, x) + self.bias) < 1:
+            w = w - y*x
+            bias = bias - y
         return (bias, w)
 
     def _loss(self, x, y):
         reg = self._lambda * np.dot(self.w, self.w) / 2
-        hinge = max(0, 1 - y * (np.dot(self.w, x) + self.bias)) 
+        hinge = max(0, 1 - y * (np.dot(self.w, x) + self.bias))
         return hinge + reg
+
+    def _accuracy(self, X, Y):
+        pred = self.predict(X)
+        loss = 0
+        for i in range(0, len(X)):
+            if pred[i] != Y[i]:
+                loss += 1
+        return loss
 
     def fit(self, train_X, train_Y):
         samples_number = len(train_X)

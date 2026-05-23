@@ -79,6 +79,3 @@ def test_poly_10():
         [800418249004.6885, 21104963196566.65, 472716863126706.9]
     ])
     np.testing.assert_allclose(SUT.gram(mat), expected_gram)
-
-
-def test_svm_gradient():

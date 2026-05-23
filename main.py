@@ -63,9 +63,23 @@ def count(splits):
             print(f"quality {quality} -> {counts[quality]} wines \t({round(norm[quality]*100, 2)}%)\n")
 
 
-from logistic_regression import SVM
-import metrics
+from models import SVM, Model
 from sklearn.linear_model import SGDClassifier
+
+def train_model(model: Model, train_x, train_y, test_x, test_y):
+    model.fit(train_x, train_y)
+
+    conf, metrics = model.score(test_x, test_y)
+    print("test set performance:")
+    print(conf)
+    print(metrics)
+    print()
+
+    conf, metrics = model.score(train_x, train_y)
+    print("train set performance:")
+    print(conf)
+    print(metrics)
+    print()
 
 def main():
     wines = load_csv("winequality-red.csv", "winequality-white.csv")
@@ -78,8 +92,8 @@ def main():
     train = scaler.scale(train)
     test = scaler.scale(test)
 
-    metrics.train(
-        SVM(iterations=1000000, lambda_par=0.0001),
+    train_model(
+        SVM(lambda_par=0.00001, n_iter_no_changes=5, tol=0.001, max_iter=200, kernel='rbf', gamma=300),
         train[features].to_numpy(),
         train[label].to_numpy(),
         test[features].to_numpy(),
