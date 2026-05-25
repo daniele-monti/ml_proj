@@ -63,8 +63,10 @@ def count(splits):
             print(f"quality {quality} -> {counts[quality]} wines \t({round(norm[quality]*100, 2)}%)\n")
 
 
-from models import SVM, Model
-from sklearn.linear_model import SGDClassifier
+from model import Model
+from kernel_models import SVM, LogReg
+#from logistic_regression import LogReg
+#from sklearn.linear_model import SGDClassifier
 
 def train_model(model: Model, train_x, train_y, test_x, test_y):
     model.fit(train_x, train_y)
@@ -92,8 +94,16 @@ def main():
     train = scaler.scale(train)
     test = scaler.scale(test)
 
+    #train_model(
+    #    LogReg(lambda_par=0.003, iterations=1000000),
+    #    train[features].to_numpy(),
+    #    train[label].to_numpy(),
+    #    test[features].to_numpy(),
+    #    test[label].to_numpy()
+    #)
+
     train_model(
-        SVM(lambda_par=0.00001, n_iter_no_changes=5, tol=0.001, max_iter=200, kernel='rbf', gamma=300),
+        LogReg(lambda_par=0.0001, n_iter_no_changes=5, tol=0.001, max_iter=200, kernel='linear', gamma=300),
         train[features].to_numpy(),
         train[label].to_numpy(),
         test[features].to_numpy(),
