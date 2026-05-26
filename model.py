@@ -1,7 +1,9 @@
 import numpy as np
 import pandas as pd
-from main import GOOD, BAD
+#from main import GOOD, BAD
 
+GOOD = 1
+BAD = -1
 
 class ConfusionMatrix():
     def __init__(self, truth, prediction):

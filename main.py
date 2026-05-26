@@ -1,5 +1,6 @@
 import pandas as pd
 from itertools import accumulate, chain, pairwise
+from timeit import default_timer as timer
 from typing import Iterator, List
 import preprocessing as prep
 
@@ -64,12 +65,16 @@ def count(splits):
 
 
 from model import Model
+#from models_old import SVM, LogReg
 from kernel_models import SVM, LogReg
-#from logistic_regression import LogReg
+#from linear_models import LogReg, SVM
 #from sklearn.linear_model import SGDClassifier
 
 def train_model(model: Model, train_x, train_y, test_x, test_y):
+    start = timer()
     model.fit(train_x, train_y)
+    end = timer()
+    print(f"fitting took {end - start} seconds")
 
     conf, metrics = model.score(test_x, test_y)
     print("test set performance:")
@@ -95,7 +100,7 @@ def main():
     test = scaler.scale(test)
 
     #train_model(
-    #    LogReg(lambda_par=0.003, iterations=1000000),
+    #    LogReg(lambda_par=0.0000087, iterations=3000000),
     #    train[features].to_numpy(),
     #    train[label].to_numpy(),
     #    test[features].to_numpy(),
@@ -103,7 +108,7 @@ def main():
     #)
 
     train_model(
-        LogReg(lambda_par=0.0001, n_iter_no_changes=5, tol=0.001, max_iter=200, kernel='linear', gamma=300),
+        SVM(lambda_par=0.0001, n_iter_no_changes=5, tol=0.001, max_iter=1000, kernel='rbf', degree=3, gamma=5),
         train[features].to_numpy(),
         train[label].to_numpy(),
         test[features].to_numpy(),

@@ -62,7 +62,6 @@ class LogReg(Model):
         self.w = np.zeros(len(X[0]))
         self.bias = 0.0
         rng = np.random.default_rng()
-
         if self.T is None:
             self.T = 10 * n_samples
         for t in range(1, self.T+1):
