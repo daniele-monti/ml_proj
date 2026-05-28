@@ -1,0 +1,121 @@
+from model import Model
+import numpy as np
+import pandas as pd
+from timeit import default_timer as timer
+from preprocessing import preprocess
+from metrics import ScoreMetrics
+import optuna
+from data import GOOD, BAD
+
+
+def evaluate(model: Model, train_x, train_y, test_x, test_y):
+    start = timer()
+    model.fit(train_x, train_y)
+    end = timer()
+    print(f"fitting took {end - start} seconds")
+
+    test_scores = model.score(test_x, test_y)
+    #print("test set performance:")
+    #test_scores.print_mat()
+    #test_scores.print_metrics()
+
+    train_scores = model.score(train_x, train_y)
+    #print("train set performance:")
+    #train_scores.print_mat()
+    #train_scores.print_metrics()
+
+    return {
+        'train': train_scores,
+        'test': test_scores
+    }
+
+
+def create_folds(X, y, k):
+    n = len(X)
+    fold_x = []
+    fold_y = []
+    for i in range(k):
+        fold_x.append(X[n*i//k : n*(i+1)//k])
+        fold_y.append(y[n*i//k : n*(i+1)//k])
+    return fold_x, fold_y
+
+
+def k_fold_CV(X, y, k, model: Model):
+    folds_x, folds_y = create_folds(X, y, k)
+    train_scores = np.empty(shape=k, dtype=ScoreMetrics)
+    test_scores = np.empty(shape=k, dtype=ScoreMetrics)
+    for i in range(k):
+        print(f"fold number {i+1}")
+        train_x = np.concat(folds_x[0:i] + folds_x[i+1:k])
+        train_y = np.concat(folds_y[0:i] + folds_y[i+1:k])
+        test_x = folds_x[i]
+        test_y = folds_y[i]
+        train_x, train_y, test_x, test_y = preprocess(train_x, train_y, test_x, test_y)
+        fold_scores = evaluate(model, train_x, train_y, test_x, test_y)
+        train_scores[i] = fold_scores['train']
+        test_scores[i] = fold_scores['test']
+    return {
+        'train': train_scores,
+        'test': test_scores
+    }
+
+
+
+def objective(trial, train_x, train_y, model: Model, k, metric='accuracy'):
+    params = {
+        'lambda_': trial.suggest_float("lambda_", 1e-10, 10, log=True),
+        #'tol': trial.suggest_float("tol", 1e-6, 0.01, log=True),
+        'kernel': trial.suggest_categorical("kernel", ['linear', 'rbf', 'poly']),
+    }
+    if params['kernel'] == 'rbf':
+        params['gamma'] = trial.suggest_float('gamma', 0.0001, 10, log=True)
+    if params['kernel'] == 'poly':
+        params['degree'] = trial.suggest_int('degree', 2, 10)
+
+    model.set_params(**params)
+
+    scores = k_fold_CV(train_x, train_y, k, model)['test']
+    overall_score = 0.0
+    for s in scores:
+        overall_score += getattr(s, metric)
+    return overall_score / k
+
+
+def nested_CV(X, y, model: Model, outer_k=5, inner_k=5):
+    folds_x, folds_y = create_folds(X, y, outer_k)
+    train_scores = np.empty(shape=outer_k, dtype=ScoreMetrics)
+    test_scores = np.empty(shape=outer_k, dtype=ScoreMetrics)
+    for i in range(outer_k):
+        print(f"OUTER FOLD NUMBER {i+1}")
+        train_x = np.concat(folds_x[0:i] + folds_x[i+1:outer_k])
+        train_y = np.concat(folds_y[0:i] + folds_y[i+1:outer_k])
+        test_x = folds_x[i]
+        test_y = folds_y[i]
+        train_x, train_y, test_x, test_y = preprocess(train_x, train_y, test_x, test_y)
+        study = optuna.create_study(direction='maximize')
+        study.optimize(lambda trial: objective(trial, train_x, train_y, model, inner_k), n_trials=20, n_jobs=1, show_progress_bar=True)
+        best_params = study.best_params
+        model.set_params(**best_params)
+        fold_scores = evaluate(model, train_x, train_y, test_x, test_y)
+        train_score = fold_scores['train']
+        test_score = fold_scores['test']
+        train_scores[i] = train_score
+        test_scores[i] = test_score
+        print("Fold test performance:")
+        test_score.print_mat()
+        test_score.print_metrics()
+        print("Fold train performance:")
+        train_score.print_mat()
+        train_score.print_metrics()
+    train_aggregate = ScoreMetrics.aggregate(train_scores)
+    test_aggregate = ScoreMetrics.aggregate(test_scores)
+    print("Overall test performance:")
+    test_aggregate.print_mat()
+    test_aggregate.print_metrics()
+    print("Overall train performance:")
+    train_aggregate.print_mat()
+    train_aggregate.print_metrics()
+    return {
+        'train': train_aggregate,
+        'test': test_aggregate
+    }

@@ -1,4 +1,26 @@
 import pandas as pd
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
+from imblearn.combine import SMOTETomek
+
+scalers = {
+    'standard': StandardScaler(),
+    'minmax': MinMaxScaler(),
+    'robust': RobustScaler()
+}
+
+rebalancers = {
+    'smotetomek': SMOTETomek()
+}
+
+def preprocess(train_x, train_y, test_x, test_y, scaler='standard', rebalancer='smotetomek'):
+    if scaler is not None:
+        train_x = scalers[scaler].fit_transform(train_x)
+        test_x = scalers[scaler].transform(test_x)
+    if rebalancer is not None:
+        train_x, train_y = rebalancers[rebalancer].fit_resample(train_x, train_y)
+    return train_x, train_y, test_x, test_y
+
+
 
 def outlier_limits(df: pd.DataFrame, kind):
     lower_limit = df.min()

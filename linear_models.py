@@ -1,16 +1,12 @@
 import numpy as np
 from model import Model
 from scipy.special import expit as sigmoid
+from data import GOOD, BAD
 
-
-GOOD = 1
-BAD = -1
 
 
 class SVM(Model):
     def __init__(self, iterations=None, eps=0.0001, lambda_par=0.001):
-        self.w = None
-        self.bias = None
         self._lambda = lambda_par
         self.T = iterations
 

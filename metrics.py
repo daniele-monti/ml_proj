@@ -1,51 +1,82 @@
-import pandas as pd
-import numpy as np
-from models import Model
 from data import GOOD, BAD
+import numpy as np
+import copy
 
 
-def create_folds(X, Y, k):
-    n = len(X)
-    fold_x = []
-    fold_y = []
-    for i in range(k):
-        fold_x.append(X[n*i//k : n*(i+1)//k])
-        fold_y.append(Y[n*i//k : n*(i+1)//k])
-    return fold_x, fold_y
+class ScoreMetrics:
+    def __init__(self, truth, prediction):
+        self.total = len(truth)
+        self.support_good = len(truth[truth == GOOD])
+        self.support_bad = len(truth[truth == BAD])
+        self.true_pos = 0
+        self.false_pos = 0
+        self.false_neg = 0
+        self.true_neg = 0
+        for index in range(len(truth)):
+            t = truth[index]
+            p = prediction[index]
+            if p == GOOD and t == GOOD:
+                self.true_pos += 1
+            if p == GOOD and t == BAD:
+                self.false_pos += 1
+            if p == BAD and t == GOOD:
+                self.false_neg += 1
+            if p == BAD and t == BAD:
+                self.true_neg += 1
+        # accuracy
+        self.accuracy = (self.true_pos + self.true_neg) / self.total
+        # positive case metrics
+        try:
+            self.precision_pos = self.true_pos / (self.true_pos + self.false_pos)
+        except ZeroDivisionError:
+            self.precision_pos = np.nan
+        try:
+            self.recall_pos = self.true_pos / (self.true_pos + self.false_neg)
+        except ZeroDivisionError:
+            self.recall_pos = np.nan
+        try:
+            self.f1_score_pos = 2 * self.precision_pos * self.recall_pos / (self.precision_pos + self.recall_pos)
+        except ZeroDivisionError:
+            self.f1_score_pos = 0.0
+        # negative case metrics
+        try:
+            self.precision_neg = self.true_neg / (self.true_neg + self.false_neg)
+        except ZeroDivisionError:
+            self.precision_neg = np.nan
+        try:
+            self.recall_neg = self.true_neg / (self.true_neg + self.false_pos)
+        except ZeroDivisionError:
+            self.recall_neg = np.nan
+        try:
+            self.f1_score_neg = 2 * self.precision_neg * self.recall_neg / (self.precision_neg + self.recall_neg)
+        except ZeroDivisionError:
+            self.f1_score_neg = 0.0
+        return
 
+    def print_metrics(self):
+        rows = [
+            " ".join([ "        "  ,  "precision"                 ,  "  recall"               , "f1_score"                  , "support"]),
+            " ".join([f"{GOOD: <8}", f"{self.precision_pos:>9.6f}", f"{self.recall_pos:>8.6f}", f"{self.f1_score_pos:>8.6f}", f"{self.support_good:>7.2f}"]),
+            " ".join([f"{BAD: <8}" , f"{self.precision_neg:>9.6f}", f"{self.recall_neg:>8.6f}", f"{self.f1_score_pos:>8.6f}", f"{self.support_good:>7.2f}"]),
+            " ".join([ "accuracy"  ,  "         "                 ,  "        "               , f"{self.accuracy:>8.6f}"    , f"{self.total:>7.2f}"]),
+        ]
+        print("\n".join(rows))
 
+    def print_mat(self):
+        #char_count = 31
+        rows = [
+            " | ".join(["         ", "pred pos", "pred neg"]),
+            #"+"*char_count,
+            " | ".join(["truth pos", f"{self.true_pos:>8}", f"{self.false_neg:>8}"]),
+            #"+"*char_count,
+            " | ".join(["truth neg", f"{self.false_pos:>8}", f"{self.true_neg:>8}"])
+        ]
+        print("\n".join(rows))
 
-def k_fold_CV(k, model: Model, X, Y):
-    folds_x, folds_y = create_folds(X, Y, k)
-
-    metrics = pd.DataFrame(
-        {
-            "precision": [0.0, 0.0, np.nan],
-            "recall": [0.0, 0.0, np.nan],
-            "f1_score": [0.0, 0.0, 0.0],
-            "support": [0, 0, 0]
-        },
-        index=[GOOD, BAD, 'accuracy']
-    )
-
-    for i in range(k):
-        print(f"fold number {i}")
-        train_x = np.concat(folds_x[0:i] + folds_x[i+1:k])
-        train_y = np.concat(folds_y[0:i] + folds_y[i+1:k])
-        #train_x = z_score_scale_array(train_x)
-        model.fit(train_x, train_y)
-
-        test_x = folds_x[i]
-        test_y = folds_y[i]
-
-        #test_x = z_score_scale_array(test_x)
-        pred = model.predict(test_x)
-
-        _, fold_metrics = evaluation_metrics(test_y, pred)
-        print(fold_metrics)
-        print()
-        metrics = metrics.add(fold_metrics, fill_value=0.0)
-        print(f"{metrics}\n\n\n")
-    
-    return metrics.div(k)
-
+    def aggregate(scores):
+        agg = copy.copy(scores[0])
+        k = len(scores)
+        for i in range(1, k):
+            for attr_name, value in vars(agg):
+                agg[attr_name] += scores[i][attr_name] / k 
+        return agg
