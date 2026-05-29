@@ -1,7 +1,7 @@
 import pandas as pd
 from itertools import accumulate, chain, pairwise
 from typing import Iterator, List
-from preprocessing import preprocess, clip_outliers
+from preprocessing import preprocess
 from evaluation import k_fold_CV, nested_CV, evaluate
 from kernel_models import SVM, LogReg
 #from linear_models import LogReg, SVM
@@ -112,33 +112,36 @@ def main():
     wines = load_csv("winequality-red.csv", "winequality-white.csv")
     wines[label] = wines[label].apply(to_binary_class)
 
-    clipped = clip_outliers(wines, columns=features)
-    X = clipped[features].to_numpy()
-    y = clipped[label].to_numpy()
+    #clipped = wines[                 
+    #    (wines['volatile acidity'] <= 1.2)       &
+    #    (wines['citric acid'] <= 1.1)            &
+    #    (wines['residual sugar'] <= 30.0)        &
+    #    (wines['chlorides'] <= 0.5)              &
+    #    (wines['free sulfur dioxide'] <= 160.0)  &
+    #    (wines['total sulfur dioxide'] <= 320.0) &
+    #    (wines['density'] <= 1.01) 
+    #]
 
-    nested_CV(
-        X,
-        y,
-        SVM(),
+    #X = clipped[features].to_numpy()
+    #y = clipped[label].to_numpy()
+
+    #nested_CV(X, y ,inner_k=3)
+    train, test = shuffle_split(wines, [0.8, 0.2])
+    train_x = train[features].to_numpy()
+    train_y = train[label].to_numpy()
+    test_x = test[features].to_numpy()
+    test_y = test[label].to_numpy()
+
+    train_x, train_y, test_x, test_y = preprocess(train_x, train_y, test_x, test_y, clipper=None)
+
+    evaluate(
+        SVM(lambda_=0.000001, kernel='poly', degree=4, gamma=2),
+        train_x,
+        train_y,
+        test_x,
+        test_y,
+        display=True,
     )
-    #train, test = shuffle_split(clipped, [0.8, 0.2])
-    #scaler = prep.Scaler(train, columns=features)
-    #train = scaler.scale(train)
-    #test = scaler.scale(test)
-    #train_x = train[features].to_numpy()
-    #train_y = train[label].to_numpy()
-    #test_x = test[features].to_numpy()
-    #test_y = test[label].to_numpy()
-
-    #train_x, train_y, test_x, test_y = preprocess(train_x, train_y, test_x, test_y)
-
-    #evaluate(
-    #    LogReg(lambda_par=0.00003, n_iter_no_changes=5, tol=0.001, max_iter=1500, kernel='rbf', degree=4, gamma=1),
-    #    train_x,
-    #    train_y,
-    #    test_x,
-    #    test_y
-    #)
 
 if __name__ == "__main__":
     main()

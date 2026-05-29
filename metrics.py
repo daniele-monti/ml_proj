@@ -77,6 +77,6 @@ class ScoreMetrics:
         agg = copy.copy(scores[0])
         k = len(scores)
         for i in range(1, k):
-            for attr_name, value in vars(agg):
-                agg[attr_name] += scores[i][attr_name] / k 
+            for attr_name, value in vars(agg).items():
+                setattr(agg, attr_name, (getattr(scores[i], attr_name)+value) / k) 
         return agg

@@ -1,6 +1,52 @@
 import pandas as pd
+import numpy as np
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
 from imblearn.combine import SMOTETomek
+
+
+def outlier_limits(data, kind):
+    lower_limits = np.min(data, axis=0)
+    upper_limits = np.max(data, axis=0)
+    if kind == "iqr":
+        q1 = np.quantile(data, 0.25, axis=0)
+        q3 = np.quantile(data, 0.75, axis=0)
+        iqr = q3 - q1
+        lower_limits = q1 - 1.5*iqr
+        upper_limits = q3 + 1.5*iqr
+    if kind == "zscore":
+        mean = np.mean(data, axis=0)
+        std = np.std(data, axis=0)
+        lower_limits = mean - 3*std
+        upper_limits = mean + 3*std
+    if kind == "percentile":
+        lower_limits = np.quantile(data, 0.01, axis=0)
+        upper_limits = np.quantile(data, 0.99, axis=0)
+    return lower_limits, upper_limits
+
+
+class IQRClipper:
+    def __init__(self):
+        return
+    def fit(self, X):
+        self.lb, self.ub = outlier_limits(X, 'iqr')
+        return 
+    def transform(self, X):
+        return np.clip(X, a_min=self.lb, a_max=self.ub)
+    def fit_transform(self, X):
+        self.fit(X)
+        return self.transform(X)
+
+class StandardClipper:
+    def __init__(self):
+        return
+    def fit(self, X):
+        self.lb, self.ub = outlier_limits(X, 'zscore')
+        return 
+    def transform(self, X):
+        return np.clip(X, a_min=self.lb, a_max=self.ub)
+    def fit_transform(self, X):
+        self.fit(X)
+        return self.transform(X)
 
 scalers = {
     'standard': StandardScaler(),
@@ -12,71 +58,18 @@ rebalancers = {
     'smotetomek': SMOTETomek()
 }
 
-def preprocess(train_x, train_y, test_x, test_y, scaler='standard', rebalancer='smotetomek'):
+clippers ={
+    'iqr': IQRClipper(),
+    'z-score': StandardClipper()
+}
+
+def preprocess(train_x, train_y, test_x, test_y, scaler='standard', rebalancer='smotetomek', clipper='zscore'):
+    if clipper is not None:
+        train_x = clippers[clipper].fit_transform(train_x)
+        test_x = clippers[clipper].transform(test_x)
     if scaler is not None:
         train_x = scalers[scaler].fit_transform(train_x)
         test_x = scalers[scaler].transform(test_x)
     if rebalancer is not None:
         train_x, train_y = rebalancers[rebalancer].fit_resample(train_x, train_y)
     return train_x, train_y, test_x, test_y
-
-
-
-def outlier_limits(df: pd.DataFrame, kind):
-    lower_limit = df.min()
-    upper_limit = df.max()
-    if kind == "iqr":
-        q1 = df.quantile(0.25)
-        q3 = df.quantile(0.75)
-        iqr = q3 - q1
-        lower_limit = q1 - 1.5*iqr
-        upper_limit = q3 + 1.5*iqr
-    if kind == "zscore":
-        mean = df.mean()
-        std = df.std()
-        lower_limit = mean - 3*std
-        upper_limit = mean + 3*std
-    if kind == "percentile":
-        lower_limit = df.quantile(0.01)
-        upper_limit = df.quantile(0.99)
-    return lower_limit, upper_limit
-
-
-def clip_outliers(df: pd.DataFrame, columns=None, kind='iqr'):
-    if columns is None:
-        lb, ub = outlier_limits(df, kind)
-        return pd.DataFrame(df.clip(lb, ub, axis=1))
-    else:
-        lb, ub = outlier_limits(df[columns], kind)
-        ret = pd.DataFrame(data=df[columns].clip(lb, ub, axis=1), columns=df.columns)
-        diff = df.columns.difference(columns) 
-        ret[diff] = df[diff] 
-        return ret
-
-
-class Scaler():
-    def __init__(self, df: pd.DataFrame, columns=None):
-        self.columns = df.columns if columns is None else columns
-        self.max = df[self.columns].max()
-        self.min = df[self.columns].min()
-    
-    def _scale_column(self, feature: pd.Series):
-        min = self.min[feature.name]
-        max = self.max[feature.name]
-        return (feature - min) / (max - min)
-
-    def scale(self, df: pd.DataFrame):
-        scaled = pd.DataFrame(columns=df.columns)
-        scaled[self.columns] = df[self.columns].apply(self._scale_column)
-        diff = df.columns.difference(self.columns)
-        if not diff.empty:
-            scaled[diff] = df[diff]
-        return scaled
-
-def scale(df: pd.DataFrame, columns=None):
-    scaled = pd.DataFrame(columns=df.columns)
-    scaled[columns] = df[columns].apply(lambda feature: (feature - feature.min()) / (feature.max() - feature.min()))
-    diff = df.columns.difference(columns)
-    if not diff.empty:
-        scaled[diff] = df[diff]
-    return scaled

@@ -1,4 +1,5 @@
 from model import Model
+from kernel_models import SVM, LogReg
 import numpy as np
 import pandas as pd
 from timeit import default_timer as timer
@@ -8,21 +9,23 @@ import optuna
 from data import GOOD, BAD
 
 
-def evaluate(model: Model, train_x, train_y, test_x, test_y):
+def evaluate(model: Model, train_x, train_y, test_x, test_y, display=False):
     start = timer()
     model.fit(train_x, train_y)
     end = timer()
     print(f"fitting took {end - start} seconds")
 
     test_scores = model.score(test_x, test_y)
-    #print("test set performance:")
-    #test_scores.print_mat()
-    #test_scores.print_metrics()
+    if display:
+        print("test set performance:")
+        test_scores.print_mat()
+        test_scores.print_metrics()
 
     train_scores = model.score(train_x, train_y)
-    #print("train set performance:")
-    #train_scores.print_mat()
-    #train_scores.print_metrics()
+    if display:
+        print("train set performance:")
+        train_scores.print_mat()
+        train_scores.print_metrics()
 
     return {
         'train': train_scores,
@@ -61,27 +64,9 @@ def k_fold_CV(X, y, k, model: Model):
 
 
 
-def objective(trial, train_x, train_y, model: Model, k, metric='accuracy'):
-    params = {
-        'lambda_': trial.suggest_float("lambda_", 1e-10, 10, log=True),
-        #'tol': trial.suggest_float("tol", 1e-6, 0.01, log=True),
-        'kernel': trial.suggest_categorical("kernel", ['linear', 'rbf', 'poly']),
-    }
-    if params['kernel'] == 'rbf':
-        params['gamma'] = trial.suggest_float('gamma', 0.0001, 10, log=True)
-    if params['kernel'] == 'poly':
-        params['degree'] = trial.suggest_int('degree', 2, 10)
-
-    model.set_params(**params)
-
-    scores = k_fold_CV(train_x, train_y, k, model)['test']
-    overall_score = 0.0
-    for s in scores:
-        overall_score += getattr(s, metric)
-    return overall_score / k
 
 
-def nested_CV(X, y, model: Model, outer_k=5, inner_k=5):
+def nested_CV(X, y, outer_k=5, inner_k=5, metric='accuracy'):
     folds_x, folds_y = create_folds(X, y, outer_k)
     train_scores = np.empty(shape=outer_k, dtype=ScoreMetrics)
     test_scores = np.empty(shape=outer_k, dtype=ScoreMetrics)
@@ -92,9 +77,35 @@ def nested_CV(X, y, model: Model, outer_k=5, inner_k=5):
         test_x = folds_x[i]
         test_y = folds_y[i]
         train_x, train_y, test_x, test_y = preprocess(train_x, train_y, test_x, test_y)
+
+        def objective(trial):
+            params = {
+                'model': trial.suggest_categorical('model', ['SVM', 'LogReg']),
+                'lambda_': trial.suggest_float("lambda_", 1e-10, 10, log=True),
+                #'tol': trial.suggest_float("tol", 1e-6, 0.01, log=True),
+                'kernel': trial.suggest_categorical("kernel", ['linear', 'rbf', 'poly']),
+            }
+            if params['kernel'] == 'rbf':
+                params['gamma'] = trial.suggest_float('gamma', 0.00001, 100, log=True)
+            if params['kernel'] == 'poly':
+                params['degree'] = trial.suggest_int('degree', 2, 15)
+            if params['model'] == 'SVM':
+                model = SVM(**params)
+            elif params['model'] == 'LogReg':
+                model = LogReg(**params)
+            scores = k_fold_CV(train_x, train_y, inner_k, model)['test']
+            overall_score = 0.0
+            for s in scores:
+                overall_score += getattr(s, metric)
+            return overall_score / inner_k
+        
         study = optuna.create_study(direction='maximize')
-        study.optimize(lambda trial: objective(trial, train_x, train_y, model, inner_k), n_trials=20, n_jobs=1, show_progress_bar=True)
+        study.optimize(objective, n_trials=5, n_jobs=1, show_progress_bar=True)
         best_params = study.best_params
+        if best_params['model'] == 'SVM':
+            model = SVM(**best_params)
+        elif best_params['model'] == 'LogReg':
+            model = LogReg(**best_params)
         model.set_params(**best_params)
         fold_scores = evaluate(model, train_x, train_y, test_x, test_y)
         train_score = fold_scores['train']
