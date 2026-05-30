@@ -10,24 +10,7 @@ from sklearn.datasets import load_breast_cancer, make_classification
 from sklearn.model_selection import train_test_split
 
 
-from data import GOOD, BAD
-
-
-features = [
-    "fixed acidity",
-    "volatile acidity",
-    "citric acid",
-    "residual sugar",
-    "chlorides",
-    "free sulfur dioxide",
-    "total sulfur dioxide",
-    "density",
-    "pH",
-    "sulphates",
-    "alcohol"
-]
-
-label = "quality"
+from data import GOOD, BAD, features, label
 
 
 def to_binary_class(quality):
@@ -122,26 +105,30 @@ def main():
     #    (wines['density'] <= 1.01) 
     #]
 
-    #X = clipped[features].to_numpy()
-    #y = clipped[label].to_numpy()
+    X = wines[features].to_numpy()
+    y = wines[label].to_numpy()
 
-    #nested_CV(X, y ,inner_k=3)
-    train, test = shuffle_split(wines, [0.8, 0.2])
-    train_x = train[features].to_numpy()
-    train_y = train[label].to_numpy()
-    test_x = test[features].to_numpy()
-    test_y = test[label].to_numpy()
+    nested_CV(X, y, SVM(), inner_k=2, outer_k=3, n_trials=3)
+    #train, test = shuffle_split(wines, [0.8, 0.2])
+    #train_x = train[features].to_numpy()
+    #train_y = train[label].to_numpy()
+    #test_x = test[features].to_numpy()
+    #test_y = test[label].to_numpy()
 
-    train_x, train_y, test_x, test_y = preprocess(train_x, train_y, test_x, test_y, clipper=None)
+    #train_x, train_y, test_x, test_y = preprocess(train_x, train_y, test_x, test_y)
 
-    evaluate(
-        SVM(lambda_=0.000001, kernel='poly', degree=4, gamma=2),
-        train_x,
-        train_y,
-        test_x,
-        test_y,
-        display=True,
-    )
+    #f = open("test.txt", mode='w', encoding='utf-8')
+
+    #evaluate(
+    #    LogReg(lambda_=0.0001, kernel='rbf', degree=10, gamma=1),
+    #    train_x,
+    #    train_y,
+    #    test_x,
+    #    test_y,
+    #    display=True,
+        #track=f
+    #)
+    #f.close()
 
 if __name__ == "__main__":
     main()

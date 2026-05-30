@@ -60,7 +60,7 @@ rebalancers = {
 
 clippers ={
     'iqr': IQRClipper(),
-    'z-score': StandardClipper()
+    'zscore': StandardClipper()
 }
 
 def preprocess(train_x, train_y, test_x, test_y, scaler='standard', rebalancer='smotetomek', clipper='zscore'):

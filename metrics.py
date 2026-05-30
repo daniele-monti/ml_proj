@@ -6,8 +6,8 @@ import copy
 class ScoreMetrics:
     def __init__(self, truth, prediction):
         self.total = len(truth)
-        self.support_good = len(truth[truth == GOOD])
-        self.support_bad = len(truth[truth == BAD])
+        self.support_pos = len(truth[truth == GOOD])
+        self.support_neg = len(truth[truth == BAD])
         self.true_pos = 0
         self.false_pos = 0
         self.false_neg = 0
@@ -56,8 +56,8 @@ class ScoreMetrics:
     def print_metrics(self):
         rows = [
             " ".join([ "        "  ,  "precision"                 ,  "  recall"               , "f1_score"                  , "support"]),
-            " ".join([f"{GOOD: <8}", f"{self.precision_pos:>9.6f}", f"{self.recall_pos:>8.6f}", f"{self.f1_score_pos:>8.6f}", f"{self.support_good:>7.2f}"]),
-            " ".join([f"{BAD: <8}" , f"{self.precision_neg:>9.6f}", f"{self.recall_neg:>8.6f}", f"{self.f1_score_pos:>8.6f}", f"{self.support_good:>7.2f}"]),
+            " ".join([f"{GOOD: <8}", f"{self.precision_pos:>9.6f}", f"{self.recall_pos:>8.6f}", f"{self.f1_score_pos:>8.6f}", f"{self.support_pos:>7.2f}"]),
+            " ".join([f"{BAD: <8}" , f"{self.precision_neg:>9.6f}", f"{self.recall_neg:>8.6f}", f"{self.f1_score_neg:>8.6f}", f"{self.support_neg:>7.2f}"]),
             " ".join([ "accuracy"  ,  "         "                 ,  "        "               , f"{self.accuracy:>8.6f}"    , f"{self.total:>7.2f}"]),
         ]
         print("\n".join(rows))
@@ -78,5 +78,7 @@ class ScoreMetrics:
         k = len(scores)
         for i in range(1, k):
             for attr_name, value in vars(agg).items():
-                setattr(agg, attr_name, (getattr(scores[i], attr_name)+value) / k) 
+                setattr(agg, attr_name, getattr(scores[i], attr_name)+value)
+        for attr_name, value in vars(agg).items():
+                setattr(agg, attr_name, value / k)
         return agg

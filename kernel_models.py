@@ -14,7 +14,7 @@ class Linear():
         return np.dot(x, y)
 
     def gram(self, X, Y):
-        return X @ Y.T
+        return 1.0 + (X @ Y.T)
 
 
 @jitclass([('gamma', float64)])
@@ -23,7 +23,7 @@ class Gaussian():
         self.gamma = gamma
     
     def inner_prod(self, x, y):
-        return np.exp(-self.gamma*np.dot(x-y, x-y))
+        return 1.0 + np.exp(-self.gamma*np.dot(x-y, x-y))
 
     def gram(self, X, Y):
         return gram(self, X, Y)
@@ -34,7 +34,7 @@ class Polynomial():
         self.degree = degree
     
     def inner_prod(self, x, y):
-        return (np.dot(x, y) + 1) ** self.degree
+        return 1.0 + (np.dot(x, y) + 1) ** self.degree
     
     def gram(self, X, Y):
         return gram(self, X, Y)
@@ -73,7 +73,7 @@ class SVM(Model):
             self,
             max_iter=1000,
             lambda_=0.0001,
-            tol=1e-3,
+            tol=1e-4,
             max_iter_no_changes=5,
             kernel="linear",
             **kernel_params
@@ -89,80 +89,80 @@ class SVM(Model):
         if 'kernel' in params.keys():
             self._kernel = KernelFactory.get_kernel(params['kernel'], **params)
 
-    def __loss(self, t, gram, Y):
+    def __loss(self, gram, Y):
         hinge_loss = 0.0
         m = len(gram)
         for i in range(m):
-            prod = np.dot(self.coeff, gram[i]) / (self.lambda_ * t)
-            hinge_loss += max(0, 1 - Y[i]*(prod + self.bias))
-        return 0.5*self.lambda_*self.norm + (hinge_loss / m)
+            prod = self.s * np.dot(self.coeff, gram[i])
+            hinge_loss += max(0, 1 - Y[i]*prod)
+        return 0.5*self.lambda_*self.norm_sq + (hinge_loss / m)
 
-    def fit(self, train_X, train_Y):
+    def fit(self, train_X, train_Y, test_X=None, test_Y=None, file=None, granularity=1000):
+        self.support = train_X.copy()
         n_samples = len(train_X)
-        #print("calculating gram matrix...")
         gram = self._kernel.gram(train_X, train_X)
-        #print(gram)
         self.coeff = np.zeros(n_samples)
-        self.norm = 0.0
-        self.bias = 0.0
+        self.norm_sq = 0.0
+        self.s = 1.0
         rng = np.random.default_rng()
-        sample_indices = np.array(range(n_samples))
         best_loss = np.inf
         n_iter_no_changes = 0
-        t_prev = 1
-        t = 1
-        for epoch in range(self.max_iter):
-            rng.shuffle(sample_indices)
-            for idx in sample_indices:
-                y_t = train_Y[idx]
-                # first compute the inner product
-                prod = np.dot(self.coeff, gram[idx]) / (self.lambda_ * t_prev)
-                # prepare coefficients for the update of the squared norm of w
-                old_norm_coeff = (1 - 1/t)
-                new_addendum_coeff = 0.0
-                # then if the hinge loss is non zero:
-                #   - update bias
-                #   - add the next addendum to the linear combination that represents w
-                #   - update new_addendum_coeff in order to correctly compute the new squared norm of w
-                if (prod + self.bias) * y_t < 1:
-                    self.bias += y_t / (self.lambda_ * t * 100)
-                    self.coeff[idx] += y_t
-                    new_addendum_coeff = y_t / (self.lambda_ * t)
-                # update the squared norm of w
-                self.norm =                                    \
-                    old_norm_coeff**2 * self.norm +            \
-                    2*old_norm_coeff*new_addendum_coeff*prod + \
-                    new_addendum_coeff**2 * gram[idx][idx]
-                # finally shrink w cause of regularization
-                t_prev = t
-                t += 1
-            epoch_loss = self.__loss(t_prev, gram, train_Y)
-            #print(f"epoch {epoch} has loss {epoch_loss}\n")
-            self.T = t_prev
-            if epoch_loss <= best_loss - self.tol:
-                best_loss = epoch_loss
-                n_iter_no_changes = 0
-            else:
-                n_iter_no_changes += 1
-            if n_iter_no_changes > self.max_iter_no_changes:
-                break
-        self.support = train_X.copy()
-        #pos = 0
-        #neg = 0
-        #with open('alpha.txt', mode='w', encoding='utf-8') as f:
-        #    f.write("index, coeff, original_y\n")
-        #    for coeff_idx, coeff in enumerate(self.coeff):
-        #        f.write(f"{coeff_idx}, {coeff}, {train_Y[coeff_idx]}\n")
-        #        if coeff > 0:
-        #            pos += 1
-        #        elif coeff < 0:
-        #            neg += 1
-        #print(f"number of positive supports: {pos}")
-        #print(f"number of negative supports: {neg}")
-                          
+        if file is not None:
+            file.write("Iteration,Loss,Train_acc,Test_acc\n")
+        for t in range(1, self.max_iter*n_samples + 2):
+            idx = rng.integers(0, n_samples)
+            y_t = train_Y[idx]
+            eta = 1.0 / (self.lambda_ * t)
+            # compute the inner product
+            prod = self.s * np.dot(self.coeff, gram[idx])     
+            # Compute the scaling factor
+            s_next = (1.0 - 1/t) * self.s
+            # Underflow handling
+            if abs(s_next) < 1e-9:
+                self.coeff = self.s * self.coeff
+                # self.w_norm_sq does not change when scaling variables reset, 
+                # because true weights stay the same.
+                self.s = 1.0
+                s_next = 1.0
+            # prepare coefficients for the update of the squared norm of w
+            old_norm_coeff = (1 - 1/t)
+            new_addendum_coeff = 0.0    
+            # then if the hinge loss is non zero:
+            #   - add the next addendum to the linear combination that represents w
+            #   - update new_addendum_coeff in order to correctly compute the new squared norm of w
+            if y_t * prod < 1:
+                self.coeff[idx] += (y_t*eta) / s_next
+                new_addendum_coeff = eta * y_t         
+            # update the squared norm of w
+            self.norm_sq =                                    \
+                old_norm_coeff**2 * self.norm_sq +            \
+                2*old_norm_coeff*new_addendum_coeff*prod +    \
+                new_addendum_coeff**2 * gram[idx][idx]
+            # update the scale factor
+            self.s = s_next
+            if file is not None:
+                if t % granularity == 1:
+                    loss = self.__loss(gram, train_Y)
+                    train_score = self.score(train_X, train_Y)
+                    test_score = self.score(test_X, test_Y)
+                    file.write(f"{t},{loss},{train_score.accuracy},{test_score.accuracy}\n")
+            if t % n_samples == 1:
+                epoch_loss = self.__loss(gram, train_Y)
+                if epoch_loss <= best_loss - self.tol:
+                    best_loss = epoch_loss
+                    n_iter_no_changes = 0
+                else:
+                    n_iter_no_changes += 1
+                if n_iter_no_changes > self.max_iter_no_changes:
+                    break
+        # Finalize alpha vector before exiting
+        self.coeff = self.s * self.coeff
+        self.s = 1.0  
+        return self
+
     def predict(self, X_test):
         gram_mat = gram(self._kernel, X_test, self.support)
-        preds = (gram_mat @ self.coeff) / (self.T * self.lambda_) + self.bias
+        preds = (gram_mat @ self.coeff)
         preds = np.sign(preds)
         return preds
 
@@ -192,75 +192,76 @@ class LogReg(Model):
         if 'kernel' in params.keys():
             self._kernel = KernelFactory.get_kernel(params['kernel'], **params)
 
-    def __loss(self, t, gram, Y):
+    def __loss(self, gram, Y):
         m = len(gram)
         log_loss = 0.0
         for i in range(m):
-            prod = np.dot(self.coeff, gram[i]) / (self.lambda_ * t)
-            log_loss += np.log(1 + np.exp(-Y[i]*(prod + self.bias)))
-        return 0.5*self.lambda_*self.norm + (log_loss / m)
+            prod = self.s * np.dot(self.coeff, gram[i])
+            log_loss += np.log(1 + np.exp(-Y[i]*prod))
+        return 0.5*self.lambda_*self.norm_sq + (log_loss / m)
 
-    def fit(self, train_X, train_Y):
+    def fit(self, train_X, train_Y, test_X=None, test_Y=None, file=None, granularity=1000):
+        self.support = train_X.copy()
         n_samples = len(train_X)
-        #print("calculating gram matrix...")
         gram = self._kernel.gram(train_X, train_X)
-        #print(gram)
         self.coeff = np.zeros(n_samples)
-        self.norm = 0.0
-        self.bias = 0.0
+        self.norm_sq = 0.0
+        self.s = 1.0
         rng = np.random.default_rng()
-        sample_indices = np.array(range(n_samples))
         best_loss = np.inf
         n_iter_no_changes = 0
-        t_prev = 1
-        t = 1
-        for epoch in range(self.max_iter):
-            rng.shuffle(sample_indices)
-            for idx in sample_indices:
-                y_t = train_Y[idx]
-                # first compute the inner product
-                prod = np.dot(self.coeff, gram[idx]) / (self.lambda_ * t_prev)
-                z = y_t*sigmoid(-y_t*(prod + self.bias))
-                # then update the norm of w
-                old_norm_coeff = (1 - 1/t)
-                new_addendum_coeff = z / (self.lambda_ * t)
-                self.norm =                                    \
-                    old_norm_coeff**2 * self.norm +            \
-                    2*old_norm_coeff*new_addendum_coeff*prod + \
-                    new_addendum_coeff**2 * gram[idx][idx]
-                # then add the next addendum to the linear combination that represents w and update the bias
-                self.coeff[idx] += z
-                self.bias += z / (self.lambda_ * t * 100)
-                # finally shrink w cause of regularization
-                t_prev = t
-                t += 1
-            epoch_loss = self.__loss(t_prev, gram, train_Y)
-            #print(f"epoch {epoch} has loss {epoch_loss}\n")
-            self.T = t_prev
-            if epoch_loss <= best_loss - self.tol:
-                best_loss = epoch_loss
-                n_iter_no_changes = 0
-            else:
-                n_iter_no_changes += 1
-            if n_iter_no_changes > self.max_iter_no_changes:
-                break
-        self.support = train_X.copy()
-        #pos = 0
-        #neg = 0
-        #with open('alpha.txt', mode='w', encoding='utf-8') as f:
-        #    f.write("index, coeff, original_y\n")
-        #    for coeff_idx, coeff in enumerate(self.coeff):
-        #        f.write(f"{coeff_idx}, {coeff}, {train_Y[coeff_idx]}\n")
-        #        if coeff > 0:
-        #            pos += 1
-        #        else:
-        #            neg += 1
-        #print(f"number of positive supports: {pos}")
-        #print(f"number of negative supports: {neg}")
+        if file is not None:
+            file.write("Iteration,Loss,Train_acc,Test_acc\n")
+        for t in range(1, self.max_iter*n_samples + 2):
+            idx = rng.integers(0, n_samples)
+            y_t = train_Y[idx]
+            eta = 1.0 / (self.lambda_ * t)
+            # compute the inner product
+            prod = self.s * np.dot(self.coeff, gram[idx])
+            z = y_t*sigmoid(-y_t*prod) 
+            # Compute the scaling factor
+            s_next = (1.0 - 1/t) * self.s
+            # Underflow handling
+            if abs(s_next) < 1e-9:
+                self.coeff = self.s * self.coeff
+                # self.w_norm_sq does not change when scaling variables reset, 
+                # because true weights stay the same.
+                self.s = 1.0
+                s_next = 1.0
+            # add the next addendum to the linear combination that represents w
+            self.coeff[idx] += (z*eta) / s_next     
+            # update the squared norm of w
+            old_norm_coeff = (1 - 1/t)
+            new_addendum_coeff = z / (self.lambda_ * t)
+            self.norm_sq =                                    \
+                old_norm_coeff**2 * self.norm_sq +            \
+                2*old_norm_coeff*new_addendum_coeff*prod + \
+                new_addendum_coeff**2 * gram[idx][idx]
+            # update the scale factor
+            self.s = s_next
+            if file is not None:
+                if t % granularity == 1:
+                    loss = self.__loss(gram, train_Y)
+                    train_score = self.score(train_X, train_Y)
+                    test_score = self.score(test_X, test_Y)
+                    file.write(f"{t},{loss},{train_score.accuracy},{test_score.accuracy}\n")
+            if t % n_samples == 1:
+                epoch_loss = self.__loss(gram, train_Y)
+                if epoch_loss <= best_loss - self.tol:
+                    best_loss = epoch_loss
+                    n_iter_no_changes = 0
+                else:
+                    n_iter_no_changes += 1
+                if n_iter_no_changes > self.max_iter_no_changes:
+                    break
+        # Finalize alpha vector before exiting
+        self.coeff = self.s * self.coeff
+        self.s = 1.0  
+        return self
 
     def predict_proba(self, X_test):
         gram_mat = gram(self._kernel, X_test, self.support)
-        preds = (gram_mat @ self.coeff) / (self.T * self.lambda_) + self.bias
+        preds = (gram_mat @ self.coeff)
         preds = sigmoid(preds)
         return preds
 

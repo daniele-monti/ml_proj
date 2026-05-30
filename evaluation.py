@@ -1,17 +1,15 @@
 from model import Model
 from kernel_models import SVM, LogReg
 import numpy as np
-import pandas as pd
 from timeit import default_timer as timer
 from preprocessing import preprocess
 from metrics import ScoreMetrics
 import optuna
-from data import GOOD, BAD
 
 
-def evaluate(model: Model, train_x, train_y, test_x, test_y, display=False):
+def evaluate(model: Model, train_x, train_y, test_x, test_y, display=False, track=None):
     start = timer()
-    model.fit(train_x, train_y)
+    model.fit(train_x, train_y, test_x, test_y, track)
     end = timer()
     print(f"fitting took {end - start} seconds")
 
@@ -63,13 +61,11 @@ def k_fold_CV(X, y, k, model: Model):
     }
 
 
-
-
-
-def nested_CV(X, y, outer_k=5, inner_k=5, metric='accuracy'):
+def nested_CV(X, y, model:Model, outer_k=5, inner_k=5, n_trials=40, metric='accuracy'):
     folds_x, folds_y = create_folds(X, y, outer_k)
     train_scores = np.empty(shape=outer_k, dtype=ScoreMetrics)
     test_scores = np.empty(shape=outer_k, dtype=ScoreMetrics)
+    f = open("hyperparameters.txt", "+a", encoding="utf-8")
     for i in range(outer_k):
         print(f"OUTER FOLD NUMBER {i+1}")
         train_x = np.concat(folds_x[0:i] + folds_x[i+1:outer_k])
@@ -80,19 +76,20 @@ def nested_CV(X, y, outer_k=5, inner_k=5, metric='accuracy'):
 
         def objective(trial):
             params = {
-                'model': trial.suggest_categorical('model', ['SVM', 'LogReg']),
-                'lambda_': trial.suggest_float("lambda_", 1e-10, 10, log=True),
+                #'model': trial.suggest_categorical('model', ['SVM', 'LogReg']),
+                'lambda_': trial.suggest_float("lambda_", 1e-12, 100, log=True),
                 #'tol': trial.suggest_float("tol", 1e-6, 0.01, log=True),
-                'kernel': trial.suggest_categorical("kernel", ['linear', 'rbf', 'poly']),
+                #'kernel': trial.suggest_categorical("kernel", ['linear', 'rbf', 'poly']),
             }
-            if params['kernel'] == 'rbf':
-                params['gamma'] = trial.suggest_float('gamma', 0.00001, 100, log=True)
-            if params['kernel'] == 'poly':
-                params['degree'] = trial.suggest_int('degree', 2, 15)
-            if params['model'] == 'SVM':
-                model = SVM(**params)
-            elif params['model'] == 'LogReg':
-                model = LogReg(**params)
+            #if params['kernel'] == 'rbf':
+            #    params['gamma'] = trial.suggest_float('gamma', 0.00001, 100, log=True)
+            #if params['kernel'] == 'poly':
+            #    params['degree'] = trial.suggest_int('degree', 2, 15)
+            #if params['model'] == 'SVM':
+            #    model = SVM(**params)
+            #elif params['model'] == 'LogReg':
+            #    model = LogReg(**params)
+            model.set_params(**params)
             scores = k_fold_CV(train_x, train_y, inner_k, model)['test']
             overall_score = 0.0
             for s in scores:
@@ -100,14 +97,17 @@ def nested_CV(X, y, outer_k=5, inner_k=5, metric='accuracy'):
             return overall_score / inner_k
         
         study = optuna.create_study(direction='maximize')
-        study.optimize(objective, n_trials=5, n_jobs=1, show_progress_bar=True)
+        study.optimize(objective, n_trials=n_trials, n_jobs=1, show_progress_bar=True)
         best_params = study.best_params
-        if best_params['model'] == 'SVM':
-            model = SVM(**best_params)
-        elif best_params['model'] == 'LogReg':
-            model = LogReg(**best_params)
+        f.write(f"fold {i}: {best_params}\n")
+        #if best_params['model'] == 'SVM':
+        #    model = SVM(**best_params)
+        #elif best_params['model'] == 'LogReg':
+        #    model = LogReg(**best_params)
+        #model.set_params(**best_params)
         model.set_params(**best_params)
-        fold_scores = evaluate(model, train_x, train_y, test_x, test_y)
+        perf = open(f"fold_{i}.txt", "w", encoding="utf-8")
+        fold_scores = evaluate(model, train_x, train_y, test_x, test_y, track=perf)
         train_score = fold_scores['train']
         test_score = fold_scores['test']
         train_scores[i] = train_score
@@ -118,6 +118,7 @@ def nested_CV(X, y, outer_k=5, inner_k=5, metric='accuracy'):
         print("Fold train performance:")
         train_score.print_mat()
         train_score.print_metrics()
+        perf.close()
     train_aggregate = ScoreMetrics.aggregate(train_scores)
     test_aggregate = ScoreMetrics.aggregate(test_scores)
     print("Overall test performance:")
@@ -126,6 +127,7 @@ def nested_CV(X, y, outer_k=5, inner_k=5, metric='accuracy'):
     print("Overall train performance:")
     train_aggregate.print_mat()
     train_aggregate.print_metrics()
+    f.close()
     return {
         'train': train_aggregate,
         'test': test_aggregate
