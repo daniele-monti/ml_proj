@@ -1,0 +1,16 @@
+Overall test performance:
+          | pred pos | pred neg
+truth pos |    538.0 |    284.6
+truth neg |     93.8 |    383.0
+         precision   recall f1_score support
+1         0.851340 0.653952 0.739615  822.60
+-1        0.573719 0.803445 0.669245  476.80
+accuracy                    0.708790 1299.40
+Overall train performance:
+          | pred pos | pred neg
+truth pos |   2111.0 |   1078.6
+truth neg |    601.6 |   2588.0
+         precision   recall f1_score support
+1         0.778208 0.661819 0.715308 3189.60
+-1        0.705817 0.811377 0.754924 3189.60
+accuracy                    0.736598 6379.20

@@ -68,7 +68,7 @@ def nested():
     X = wines[features].to_numpy()
     y = wines[label].to_numpy()
 
-    nested_CV(X, y, LinearLogReg(max_iter_no_changes=5, max_iter=200), kind='linear', inner_k=5, outer_k=5, n_trials=20)
+    nested_CV(X, y, SVM(kernel='linear', max_iter_no_changes=5, max_iter=200), kind='linear', inner_k=5, outer_k=5, n_trials=20)
 
 def main():
     nested()
