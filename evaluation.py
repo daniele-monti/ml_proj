@@ -82,14 +82,14 @@ def nested_CV(X, y, model:Model, kind='linear', outer_k=5, inner_k=5, n_trials=4
         def objective(trial):
             params = {
                 #'model': trial.suggest_categorical('model', ['SVM', 'LogReg']),
-                'lambda_': trial.suggest_float("lambda_", 1e-12, 10, log=True),
+                'lambda_': trial.suggest_float("lambda_", 1e-12, 100, log=True),
                 #'tol': trial.suggest_float("tol", 1e-6, 0.01, log=True),
                 #'kernel': trial.suggest_categorical("kernel", ['linear', 'rbf', 'poly']),
             }
             if kind == 'rbf':
                 params['gamma'] = trial.suggest_float('gamma', 0.00001, 100, log=True)
             if kind == 'poly':
-                params['degree'] = trial.suggest_int('degree', 2, 15)
+                params['degree'] = trial.suggest_int('degree', 2, 12)
             #if params['model'] == 'SVM':
             #    model = SVM(**params)
             #elif params['model'] == 'LogReg':
@@ -132,7 +132,7 @@ def nested_CV(X, y, model:Model, kind='linear', outer_k=5, inner_k=5, n_trials=4
         #print("Fold train performance:")
         #train_score.print_mat()
         #train_score.print_metrics()
-        #perf.close()
+        perf.close()
     train_aggregate = ScoreMetrics.aggregate(train_scores)
     test_aggregate = ScoreMetrics.aggregate(test_scores)
     print("Overall test performance:")

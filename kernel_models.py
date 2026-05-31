@@ -68,13 +68,32 @@ class KernelFactory:
                 return Polynomial()
 
 
+@jit(parallel=True, nopython=True)
+def compute_hinge_loss(gram, coeff, s, train_Y, lambda_, norm_sq):
+    n_samples = len(train_Y)
+    hinge_loss_sum = 0.0
+    for i in prange(n_samples):
+        prod = s * np.dot(coeff, gram[i])
+        hinge_loss_sum += max(0.0, 1.0 - train_Y[i] * prod)
+    return (hinge_loss_sum / n_samples) + (0.5 * lambda_ * norm_sq)
+
+
+@jit(parallel=True, nopython=True)
+def compute_log_loss(gram, coeff, s, train_Y, lambda_, norm_sq):
+    n_samples = len(train_Y)
+    log_loss_sum = 0.0
+    for i in prange(n_samples):
+        prod = s * np.dot(coeff, gram[i])
+        log_loss_sum += np.log(1.0 + np.exp(-train_Y[i] * prod))
+    return (log_loss_sum / n_samples) + (0.5 * lambda_ * norm_sq)
+
 
 class SVM(Model):
     def __init__(
             self,
             max_iter=1000,
             lambda_=0.0001,
-            tol=1e-4,
+            tol=1e-3,
             max_iter_no_changes=5,
             kernel="linear",
             **kernel_params
@@ -90,23 +109,16 @@ class SVM(Model):
         if 'kernel' in params.keys():
             self._kernel = KernelFactory.get_kernel(params['kernel'], **params)
 
-    def __loss(self, gram, Y):
-        hinge_loss = 0.0
-        m = len(gram)
-        for i in range(m):
-            prod = self.s * np.dot(self.coeff, gram[i])
-            hinge_loss += max(0, 1 - Y[i]*prod)
-        return 0.5*self.lambda_*self.norm_sq + (hinge_loss / m)
 
     def fit(self, train_X, train_Y, test_X=None, test_Y=None, file=None, granularity=500):
         self.support = train_X.copy()
         n_samples = len(train_X)
         gram = self._kernel.gram(train_X, train_X)
+        if file is not None:
+            test_gram = self._kernel.gram(test_X, train_X)
         self.coeff = np.zeros(n_samples)
         self.norm_sq = 0.0
         self.s = 1.0
-        smoothed_loss = 1.0
-        alpha = 0.995
         best_loss = np.inf
         n_iter_no_changes = 0
         rng = np.random.default_rng()
@@ -145,22 +157,21 @@ class SVM(Model):
             # update the scale factor
             self.s = s_next
             # update loss estimate
-            single_train_point_loss = 0.5*self.lambda_*self.norm_sq + max(0.0, 1 - margin)
-            smoothed_loss = alpha*smoothed_loss + (1 - alpha)*single_train_point_loss
             if file is not None:
                 if t % granularity == 1:
                     self.__check_scores_and_loss(
                         gram,
+                        test_gram,
                         train_Y,
-                        test_X,
                         test_Y,
-                        smoothed_loss,
+                        compute_hinge_loss(gram, self.coeff, self.s, train_Y, self.lambda_, self.norm_sq),
                         file, 
                         t
                     )
             if t % n_samples == 1:
-                if smoothed_loss <= best_loss - self.tol:
-                    best_loss = smoothed_loss
+                epoch_loss = compute_hinge_loss(gram, self.coeff, self.s, train_Y, self.lambda_, self.norm_sq)
+                if epoch_loss <= best_loss - self.tol:
+                    best_loss = epoch_loss
                     n_iter_no_changes = 0
                 else:
                     n_iter_no_changes += 1
@@ -171,9 +182,8 @@ class SVM(Model):
         self.s = 1.0  
         return self
 
-    def __check_scores_and_loss(self, train_gram, train_Y, test_X, test_Y, loss, file, t):
+    def __check_scores_and_loss(self, train_gram, test_gram, train_Y, test_Y, loss, file, t):
         current_coeff_state = self.s * self.coeff
-        test_gram = gram(self._kernel, test_X, self.support)
         train_preds = np.sign(train_gram @ current_coeff_state)
         test_preds = np.sign(test_gram @ current_coeff_state)
         train_score = ScoreMetrics(train_preds, train_Y)
@@ -212,23 +222,16 @@ class LogReg(Model):
         if 'kernel' in params.keys():
             self._kernel = KernelFactory.get_kernel(params['kernel'], **params)
 
-    def __loss(self, gram, Y):
-        m = len(gram)
-        log_loss = 0.0
-        for i in range(m):
-            prod = self.s * np.dot(self.coeff, gram[i])
-            log_loss += np.log(1 + np.exp(-Y[i]*prod))
-        return 0.5*self.lambda_*self.norm_sq + (log_loss / m)
 
     def fit(self, train_X, train_Y, test_X=None, test_Y=None, file=None, granularity=500):
         self.support = train_X.copy()
         n_samples = len(train_X)
         gram = self._kernel.gram(train_X, train_X)
+        if file is not None:
+            test_gram = self._kernel.gram(test_X, train_X)
         self.coeff = np.zeros(n_samples)
         self.norm_sq = 0.0
         self.s = 1.0
-        smoothed_loss = np.log(2)
-        alpha = 0.995
         best_loss = np.inf
         n_iter_no_changes = 0
         rng = np.random.default_rng()
@@ -261,24 +264,22 @@ class LogReg(Model):
                 2*old_norm_coeff*new_addendum_coeff*prod + \
                 new_addendum_coeff**2 * gram[idx][idx]
             # update the scale factor
-            self.s = s_next
-            # update loss estimate
-            single_train_point_loss = 0.5*self.lambda_*self.norm_sq + np.log(1.0 + np.exp(-margin))
-            smoothed_loss = alpha*smoothed_loss + (1 - alpha)*single_train_point_loss      
+            self.s = s_next   
             if file is not None:
                 if t % granularity == 1:
                     self.__check_scores_and_loss(
                         gram,
+                        test_gram,
                         train_Y,
-                        test_X,
                         test_Y,
-                        smoothed_loss,
+                        compute_log_loss(gram, self.coeff, self.s, train_Y, self.lambda_, self.norm_sq),
                         file, 
                         t
                     )
             if t % n_samples == 1:
-                if smoothed_loss <= best_loss - self.tol:
-                    best_loss = smoothed_loss
+                epoch_loss = compute_log_loss(gram, self.coeff, self.s, train_Y, self.lambda_, self.norm_sq)
+                if epoch_loss <= best_loss - self.tol:
+                    best_loss = epoch_loss
                     n_iter_no_changes = 0
                 else:
                     n_iter_no_changes += 1
@@ -289,9 +290,8 @@ class LogReg(Model):
         self.s = 1.0  
         return self
 
-    def __check_scores_and_loss(self, train_gram, train_Y, test_X, test_Y, loss, file, t):
+    def __check_scores_and_loss(self, train_gram, test_gram, train_Y, test_Y, loss, file, t):
         current_coeff_state = self.s * self.coeff
-        test_gram = gram(self._kernel, test_X, self.support)
         train_preds = to_original_classes( (sigmoid(train_gram @ current_coeff_state) >= 0.5).astype(int) )
         test_preds = to_original_classes( (sigmoid(test_gram @ current_coeff_state) >= 0.5).astype(int) )
         train_score = ScoreMetrics(train_preds, train_Y)
