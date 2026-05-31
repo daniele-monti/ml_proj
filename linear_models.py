@@ -16,47 +16,47 @@ class LinearSVM(Model):
         self.max_iter_no_changes = max_iter_no_changes
         self.max_iter = max_iter
 
-    def _gradient(self, x, y):
-        w = self.lambda_ * self.w
-        bias = 0.0
-        if y * (np.dot(self.w, x) + self.bias) < 1:
-            w = w - y*x
-            bias = bias - y
-        return (bias, w)
-
-    def __loss(self, X, y):
-        reg = self.lambda_ * np.dot(self.w, self.w) / 2
-        hinge = 0.0
-        for x, y in zip(X, y):
-            hinge += max(0, 1 - y * (np.dot(self.w, x) + self.bias))
-        return (hinge / len(X)) + reg
-
-    def fit(self, train_X, train_Y):
-        n_samples = len(train_X)
-        self.w = np.zeros(len(train_X[0]))
+    def fit(self, train_X, train_Y, test_X=None, test_Y=None, file=None, granularity=500):
+        n_samples, n_features = train_X.shape
+        self.w = np.zeros(n_features)
         self.bias = 0.0
-        rng = np.random.default_rng()
-        sample_indices = np.array(range(n_samples))
+        smoothed_loss = 1.0
+        alpha = 0.995
         best_loss = np.inf
         n_iter_no_changes = 0
-        t = 0
-        for epoch in self.max_iter:
-            rng.shuffle(sample_indices)
-            for idx in sample_indices:
-                x_t = train_X[idx]
-                y_t = train_Y[idx]
-                eta = 1 / (t * self.lambda_)
-                bias_der, w_grad = self._gradient(x_t, y_t)
-                self.w -= eta * w_grad
-                self.bias -= eta * bias_der
-            epoch_loss = self.__loss(train_X, train_Y)
-            if epoch_loss <= best_loss - self.tol:
-                best_loss = epoch_loss
-                n_iter_no_changes = 0
+        rng = np.random.default_rng()
+        if file is not None:
+            file.write("Iteration,Loss,Train_acc,Test_acc\n")
+        for t in range(1, self.max_iter*n_samples + 2):
+            idx = rng.integers(0, n_samples)
+            x_t = train_X[idx]
+            y_t = train_Y[idx]
+            eta = 1.0 / (self.lambda_ * t)
+            # compute the inner product and the margin
+            prod = np.dot(self.w, x_t) + self.bias
+            margin = y_t * prod
+            if margin < 1:
+                self.w = (1 - 1/t)*self.w + eta*y_t*x_t 
+                self.bias += eta * y_t
             else:
-                n_iter_no_changes += 1
-            if n_iter_no_changes > self.max_iter_no_changes:
-                break
+                self.w = (1 - 1/t)*self.w
+            # update loss estimate
+            single_train_point_loss = 0.5*self.lambda_*np.dot(self.w, self.w) + max(0.0, 1 - margin)
+            smoothed_loss = alpha*smoothed_loss + (1 - alpha)*single_train_point_loss
+            if file is not None:
+                if t % granularity == 1:
+                    train_score = self.score(train_X, train_Y)
+                    test_score = self.score(test_X, test_Y)
+                    file.write(f"{t},{smoothed_loss},{train_score.accuracy},{test_score.accuracy}\n")
+            if t % n_samples == 1:
+                if smoothed_loss <= best_loss - self.tol:
+                    best_loss = smoothed_loss
+                    n_iter_no_changes = 0
+                else:
+                    n_iter_no_changes += 1
+                if n_iter_no_changes > self.max_iter_no_changes:
+                    break
+            
         
     def predict(self, X_test):
         return np.array([np.sign(np.dot(self.w, x) + self.bias) for x in X_test])
@@ -79,38 +79,44 @@ class LinearLogReg(Model):
         self.max_iter_no_changes = max_iter_no_changes
         self.max_iter = max_iter
 
-    def __loss(self, X, y):
-        reg = self.lambda_ * np.dot(self.w, self.w) / 2
-        for x, y in zip(X, y):
-            log_loss += np.log(1 + np.exp(-y * (np.dot(self.w, x) + self.bias)))
-        return (log_loss / len(X)) + reg
-
-    def fit(self, train_X, train_Y):
-        n_samples = len(train_X)
-        self.w = np.zeros(len(train_X[0]))
+    def fit(self, train_X, train_Y, test_X=None, test_Y=None, file=None, granularity=500):
+        n_samples, n_features = train_X.shape
+        self.w = np.zeros(n_features)
         self.bias = 0.0
-        rng = np.random.default_rng()
-        sample_indices = np.array(range(n_samples))
+        smoothed_loss = np.log(2)
+        alpha = 0.995
         best_loss = np.inf
         n_iter_no_changes = 0
-        t = 0
-        for epoch in self.max_iter:
-            rng.shuffle(sample_indices)
-            for idx in sample_indices:
-                x_t = train_X[idx]
-                y_t = train_Y[idx]
-                eta = 1 / (t * self.lambda_)
-                common = eta * y_t * sigmoid(-y_t * (np.dot(self.w, x_t) + self.bias))
-                self.w += common * x_t - self.w / t
-                self.bias += common
-            epoch_loss = self.__loss(train_X, train_Y)
-            if epoch_loss <= best_loss - self.tol:
-                best_loss = epoch_loss
-                n_iter_no_changes = 0
-            else:
-                n_iter_no_changes += 1
-            if n_iter_no_changes > self.max_iter_no_changes:
-                break
+        rng = np.random.default_rng()
+        if file is not None:
+            file.write("Iteration,Loss,Train_acc,Test_acc\n")
+        for t in range(1, self.max_iter*n_samples + 2):
+            idx = rng.integers(0, n_samples)
+            x_t = train_X[idx]
+            y_t = train_Y[idx]
+            eta = 1 / (t * self.lambda_)
+            # compute the inner product and the margin
+            prod = np.dot(self.w, x_t) + self.bias
+            margin = np.clip(y_t * prod, -20, 50)
+            error_multiplier = y_t*sigmoid(-margin)
+            self.w = (1 - 1/t)*self.w + eta*error_multiplier*x_t
+            self.bias += eta * error_multiplier
+            # update loss estimate
+            single_train_point_loss = 0.5*self.lambda_*np.dot(self.w, self.w) + np.log(1.0 + np.exp(-margin))
+            smoothed_loss = alpha*smoothed_loss + (1 - alpha)*single_train_point_loss
+            if file is not None:
+                if t % granularity == 1:
+                    train_score = self.score(train_X, train_Y)
+                    test_score = self.score(test_X, test_Y)
+                    file.write(f"{t},{smoothed_loss},{train_score.accuracy},{test_score.accuracy}\n")
+            if t % n_samples == 1:
+                if smoothed_loss <= best_loss - self.tol:
+                    best_loss = smoothed_loss
+                    n_iter_no_changes = 0
+                else:
+                    n_iter_no_changes += 1
+                if n_iter_no_changes > self.max_iter_no_changes:
+                    break
 
     def predict_proba(self, X_test):
         return np.array([sigmoid(np.dot(self.w, x) + self.bias) for x in X_test])

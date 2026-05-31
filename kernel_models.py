@@ -2,6 +2,7 @@ import numpy as np
 from numba import float64, int64, jit, prange
 from numba.experimental import jitclass
 from model import Model
+from metrics import ScoreMetrics
 from scipy.special import expit as sigmoid
 
 
@@ -97,24 +98,27 @@ class SVM(Model):
             hinge_loss += max(0, 1 - Y[i]*prod)
         return 0.5*self.lambda_*self.norm_sq + (hinge_loss / m)
 
-    def fit(self, train_X, train_Y, test_X=None, test_Y=None, file=None, granularity=1000):
+    def fit(self, train_X, train_Y, test_X=None, test_Y=None, file=None, granularity=500):
         self.support = train_X.copy()
         n_samples = len(train_X)
         gram = self._kernel.gram(train_X, train_X)
         self.coeff = np.zeros(n_samples)
         self.norm_sq = 0.0
         self.s = 1.0
-        rng = np.random.default_rng()
+        smoothed_loss = 1.0
+        alpha = 0.995
         best_loss = np.inf
         n_iter_no_changes = 0
+        rng = np.random.default_rng()
         if file is not None:
             file.write("Iteration,Loss,Train_acc,Test_acc\n")
         for t in range(1, self.max_iter*n_samples + 2):
             idx = rng.integers(0, n_samples)
             y_t = train_Y[idx]
             eta = 1.0 / (self.lambda_ * t)
-            # compute the inner product
-            prod = self.s * np.dot(self.coeff, gram[idx])     
+            # compute the inner product and the margin
+            prod = self.s * np.dot(self.coeff, gram[idx])
+            margin = y_t * prod     
             # Compute the scaling factor
             s_next = (1.0 - 1/t) * self.s
             # Underflow handling
@@ -130,7 +134,7 @@ class SVM(Model):
             # then if the hinge loss is non zero:
             #   - add the next addendum to the linear combination that represents w
             #   - update new_addendum_coeff in order to correctly compute the new squared norm of w
-            if y_t * prod < 1:
+            if margin < 1:
                 self.coeff[idx] += (y_t*eta) / s_next
                 new_addendum_coeff = eta * y_t         
             # update the squared norm of w
@@ -140,16 +144,23 @@ class SVM(Model):
                 new_addendum_coeff**2 * gram[idx][idx]
             # update the scale factor
             self.s = s_next
+            # update loss estimate
+            single_train_point_loss = 0.5*self.lambda_*self.norm_sq + max(0.0, 1 - margin)
+            smoothed_loss = alpha*smoothed_loss + (1 - alpha)*single_train_point_loss
             if file is not None:
                 if t % granularity == 1:
-                    loss = self.__loss(gram, train_Y)
-                    train_score = self.score(train_X, train_Y)
-                    test_score = self.score(test_X, test_Y)
-                    file.write(f"{t},{loss},{train_score.accuracy},{test_score.accuracy}\n")
+                    self.__check_scores_and_loss(
+                        gram,
+                        train_Y,
+                        test_X,
+                        test_Y,
+                        smoothed_loss,
+                        file, 
+                        t
+                    )
             if t % n_samples == 1:
-                epoch_loss = self.__loss(gram, train_Y)
-                if epoch_loss <= best_loss - self.tol:
-                    best_loss = epoch_loss
+                if smoothed_loss <= best_loss - self.tol:
+                    best_loss = smoothed_loss
                     n_iter_no_changes = 0
                 else:
                     n_iter_no_changes += 1
@@ -159,6 +170,15 @@ class SVM(Model):
         self.coeff = self.s * self.coeff
         self.s = 1.0  
         return self
+
+    def __check_scores_and_loss(self, train_gram, train_Y, test_X, test_Y, loss, file, t):
+        current_coeff_state = self.s * self.coeff
+        test_gram = gram(self._kernel, test_X, self.support)
+        train_preds = np.sign(train_gram @ current_coeff_state)
+        test_preds = np.sign(test_gram @ current_coeff_state)
+        train_score = ScoreMetrics(train_preds, train_Y)
+        test_score = ScoreMetrics(test_preds, test_Y)
+        file.write(f"{t},{loss},{train_score.accuracy},{test_score.accuracy}\n")
 
     def predict(self, X_test):
         gram_mat = gram(self._kernel, X_test, self.support)
@@ -200,16 +220,18 @@ class LogReg(Model):
             log_loss += np.log(1 + np.exp(-Y[i]*prod))
         return 0.5*self.lambda_*self.norm_sq + (log_loss / m)
 
-    def fit(self, train_X, train_Y, test_X=None, test_Y=None, file=None, granularity=1000):
+    def fit(self, train_X, train_Y, test_X=None, test_Y=None, file=None, granularity=500):
         self.support = train_X.copy()
         n_samples = len(train_X)
         gram = self._kernel.gram(train_X, train_X)
         self.coeff = np.zeros(n_samples)
         self.norm_sq = 0.0
         self.s = 1.0
-        rng = np.random.default_rng()
+        smoothed_loss = np.log(2)
+        alpha = 0.995
         best_loss = np.inf
         n_iter_no_changes = 0
+        rng = np.random.default_rng()
         if file is not None:
             file.write("Iteration,Loss,Train_acc,Test_acc\n")
         for t in range(1, self.max_iter*n_samples + 2):
@@ -218,7 +240,8 @@ class LogReg(Model):
             eta = 1.0 / (self.lambda_ * t)
             # compute the inner product
             prod = self.s * np.dot(self.coeff, gram[idx])
-            z = y_t*sigmoid(-y_t*prod) 
+            margin = np.clip(y_t * prod, -20, 50)
+            error_multiplier = y_t*sigmoid(-margin)
             # Compute the scaling factor
             s_next = (1.0 - 1/t) * self.s
             # Underflow handling
@@ -229,26 +252,33 @@ class LogReg(Model):
                 self.s = 1.0
                 s_next = 1.0
             # add the next addendum to the linear combination that represents w
-            self.coeff[idx] += (z*eta) / s_next     
+            self.coeff[idx] += (error_multiplier*eta) / s_next
             # update the squared norm of w
             old_norm_coeff = (1 - 1/t)
-            new_addendum_coeff = z / (self.lambda_ * t)
+            new_addendum_coeff = eta * error_multiplier
             self.norm_sq =                                    \
                 old_norm_coeff**2 * self.norm_sq +            \
                 2*old_norm_coeff*new_addendum_coeff*prod + \
                 new_addendum_coeff**2 * gram[idx][idx]
             # update the scale factor
             self.s = s_next
+            # update loss estimate
+            single_train_point_loss = 0.5*self.lambda_*self.norm_sq + np.log(1.0 + np.exp(-margin))
+            smoothed_loss = alpha*smoothed_loss + (1 - alpha)*single_train_point_loss      
             if file is not None:
                 if t % granularity == 1:
-                    loss = self.__loss(gram, train_Y)
-                    train_score = self.score(train_X, train_Y)
-                    test_score = self.score(test_X, test_Y)
-                    file.write(f"{t},{loss},{train_score.accuracy},{test_score.accuracy}\n")
+                    self.__check_scores_and_loss(
+                        gram,
+                        train_Y,
+                        test_X,
+                        test_Y,
+                        smoothed_loss,
+                        file, 
+                        t
+                    )
             if t % n_samples == 1:
-                epoch_loss = self.__loss(gram, train_Y)
-                if epoch_loss <= best_loss - self.tol:
-                    best_loss = epoch_loss
+                if smoothed_loss <= best_loss - self.tol:
+                    best_loss = smoothed_loss
                     n_iter_no_changes = 0
                 else:
                     n_iter_no_changes += 1
@@ -258,6 +288,16 @@ class LogReg(Model):
         self.coeff = self.s * self.coeff
         self.s = 1.0  
         return self
+
+    def __check_scores_and_loss(self, train_gram, train_Y, test_X, test_Y, loss, file, t):
+        current_coeff_state = self.s * self.coeff
+        test_gram = gram(self._kernel, test_X, self.support)
+        train_preds = to_original_classes( (sigmoid(train_gram @ current_coeff_state) >= 0.5).astype(int) )
+        test_preds = to_original_classes( (sigmoid(test_gram @ current_coeff_state) >= 0.5).astype(int) )
+        train_score = ScoreMetrics(train_preds, train_Y)
+        test_score = ScoreMetrics(test_preds, test_Y)
+        file.write(f"{t},{loss},{train_score.accuracy},{test_score.accuracy}\n")
+
 
     def predict_proba(self, X_test):
         gram_mat = gram(self._kernel, X_test, self.support)

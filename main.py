@@ -4,7 +4,7 @@ from typing import Iterator, List
 from preprocessing import preprocess
 from evaluation import k_fold_CV, nested_CV, evaluate
 from kernel_models import SVM, LogReg
-#from linear_models import LogReg, SVM
+from linear_models import LinearLogReg, LinearSVM
 
 from sklearn.datasets import load_breast_cancer, make_classification
 from sklearn.model_selection import train_test_split
@@ -108,7 +108,7 @@ def main():
     X = wines[features].to_numpy()
     y = wines[label].to_numpy()
 
-    nested_CV(X, y, SVM(), inner_k=2, outer_k=3, n_trials=3)
+    nested_CV(X, y, LogReg(), kind='linear', inner_k=5, outer_k=5, n_trials=40)
     #train, test = shuffle_split(wines, [0.8, 0.2])
     #train_x = train[features].to_numpy()
     #train_y = train[label].to_numpy()

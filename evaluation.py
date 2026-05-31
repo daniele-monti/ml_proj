@@ -61,30 +61,35 @@ def k_fold_CV(X, y, k, model: Model):
     }
 
 
-def nested_CV(X, y, model:Model, outer_k=5, inner_k=5, n_trials=40, metric='accuracy'):
+def nested_CV(X, y, model:Model, kind='linear', outer_k=5, inner_k=5, n_trials=40, metric='accuracy'):
     folds_x, folds_y = create_folds(X, y, outer_k)
     train_scores = np.empty(shape=outer_k, dtype=ScoreMetrics)
     test_scores = np.empty(shape=outer_k, dtype=ScoreMetrics)
-    f = open("hyperparameters.txt", "+a", encoding="utf-8")
+    f = open("hyperparameters.txt", "+w", encoding="utf-8")
+    if kind == 'linear':
+        f.write("Fold,Lambda\n")
+    elif kind == 'rbf':
+        f.write("Fold,Lambda,Gamma\n")
+    elif kind == 'poly':
+        f.write("Fold,Lambda,Degree\n")
     for i in range(outer_k):
         print(f"OUTER FOLD NUMBER {i+1}")
         train_x = np.concat(folds_x[0:i] + folds_x[i+1:outer_k])
         train_y = np.concat(folds_y[0:i] + folds_y[i+1:outer_k])
         test_x = folds_x[i]
         test_y = folds_y[i]
-        train_x, train_y, test_x, test_y = preprocess(train_x, train_y, test_x, test_y)
 
         def objective(trial):
             params = {
                 #'model': trial.suggest_categorical('model', ['SVM', 'LogReg']),
-                'lambda_': trial.suggest_float("lambda_", 1e-12, 100, log=True),
+                'lambda_': trial.suggest_float("lambda_", 1e-12, 10, log=True),
                 #'tol': trial.suggest_float("tol", 1e-6, 0.01, log=True),
                 #'kernel': trial.suggest_categorical("kernel", ['linear', 'rbf', 'poly']),
             }
-            #if params['kernel'] == 'rbf':
-            #    params['gamma'] = trial.suggest_float('gamma', 0.00001, 100, log=True)
-            #if params['kernel'] == 'poly':
-            #    params['degree'] = trial.suggest_int('degree', 2, 15)
+            if kind == 'rbf':
+                params['gamma'] = trial.suggest_float('gamma', 0.00001, 100, log=True)
+            if kind == 'poly':
+                params['degree'] = trial.suggest_int('degree', 2, 15)
             #if params['model'] == 'SVM':
             #    model = SVM(**params)
             #elif params['model'] == 'LogReg':
@@ -99,26 +104,35 @@ def nested_CV(X, y, model:Model, outer_k=5, inner_k=5, n_trials=40, metric='accu
         study = optuna.create_study(direction='maximize')
         study.optimize(objective, n_trials=n_trials, n_jobs=1, show_progress_bar=True)
         best_params = study.best_params
-        f.write(f"fold {i}: {best_params}\n")
+
+        if kind == 'linear':
+            f.write(f"{i},{best_params['lambda_']}\n")
+        elif kind == 'rbf':
+            f.write(f"{i},{best_params['lambda_']},{best_params['gamma']}\n")
+        elif kind == 'poly':
+            f.write(f"{i},{best_params['lambda_']},{best_params['degree']}\n")
+        
         #if best_params['model'] == 'SVM':
         #    model = SVM(**best_params)
         #elif best_params['model'] == 'LogReg':
         #    model = LogReg(**best_params)
         #model.set_params(**best_params)
         model.set_params(**best_params)
-        perf = open(f"fold_{i}.txt", "w", encoding="utf-8")
+        perf = open(f"fold_{i}.txt", "+w", encoding="utf-8")
+        
+        train_x, train_y, test_x, test_y = preprocess(train_x, train_y, test_x, test_y)
         fold_scores = evaluate(model, train_x, train_y, test_x, test_y, track=perf)
         train_score = fold_scores['train']
         test_score = fold_scores['test']
         train_scores[i] = train_score
         test_scores[i] = test_score
-        print("Fold test performance:")
-        test_score.print_mat()
-        test_score.print_metrics()
-        print("Fold train performance:")
-        train_score.print_mat()
-        train_score.print_metrics()
-        perf.close()
+        #print("Fold test performance:")
+        #test_score.print_mat()
+        #test_score.print_metrics()
+        #print("Fold train performance:")
+        #train_score.print_mat()
+        #train_score.print_metrics()
+        #perf.close()
     train_aggregate = ScoreMetrics.aggregate(train_scores)
     test_aggregate = ScoreMetrics.aggregate(test_scores)
     print("Overall test performance:")
