@@ -63,10 +63,12 @@ def nested():
     wines = load_csv("winequality-red.csv", "winequality-white.csv")
     wines[label] = wines[label].apply(to_binary_class)
 
+    wines = wines.sample(frac=1, ignore_index=True)
+
     X = wines[features].to_numpy()
     y = wines[label].to_numpy()
 
-    nested_CV(X, y, LogReg(kernel='poly', max_iter_no_changes=5, max_iter=200), kind='poly', inner_k=5, outer_k=5, n_trials=20)
+    nested_CV(X, y, LinearLogReg(max_iter_no_changes=5, max_iter=200), kind='linear', inner_k=5, outer_k=5, n_trials=20)
 
 def main():
     nested()

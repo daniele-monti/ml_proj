@@ -7,11 +7,20 @@ from metrics import ScoreMetrics
 import optuna
 
 
+
+def shuffle_dataset(X, y):
+    n_samples = len(y)
+    rng = np.random.default_rng()
+    permutation = rng.permutation(n_samples)
+    X_shuffled = X[permutation]
+    y_shuffled = y[permutation]
+    return X_shuffled, y_shuffled
+
 def evaluate(model: Model, train_x, train_y, test_x, test_y, display=False, track=None):
-    start = timer()
+    #start = timer()
     model.fit(train_x, train_y, test_x, test_y, track)
-    end = timer()
-    print(f"fitting took {end - start} seconds")
+    #end = timer()
+    #print(f"fitting took {end - start} seconds")
 
     test_scores = model.score(test_x, test_y)
     if display:
@@ -46,7 +55,7 @@ def k_fold_CV(X, y, k, model: Model):
     train_scores = np.empty(shape=k, dtype=ScoreMetrics)
     test_scores = np.empty(shape=k, dtype=ScoreMetrics)
     for i in range(k):
-        print(f"fold number {i+1}")
+        #print(f"fold number {i+1}")
         train_x = np.concat(folds_x[0:i] + folds_x[i+1:k])
         train_y = np.concat(folds_y[0:i] + folds_y[i+1:k])
         test_x = folds_x[i]
@@ -81,21 +90,15 @@ def nested_CV(X, y, model:Model, kind='linear', outer_k=5, inner_k=5, n_trials=4
 
         def objective(trial):
             params = {
-                #'model': trial.suggest_categorical('model', ['SVM', 'LogReg']),
                 'lambda_': trial.suggest_float("lambda_", 1e-12, 100, log=True),
-                #'tol': trial.suggest_float("tol", 1e-6, 0.01, log=True),
-                #'kernel': trial.suggest_categorical("kernel", ['linear', 'rbf', 'poly']),
             }
             if kind == 'rbf':
                 params['gamma'] = trial.suggest_float('gamma', 0.00001, 100, log=True)
             if kind == 'poly':
                 params['degree'] = trial.suggest_int('degree', 2, 12)
-            #if params['model'] == 'SVM':
-            #    model = SVM(**params)
-            #elif params['model'] == 'LogReg':
-            #    model = LogReg(**params)
             model.set_params(**params)
-            scores = k_fold_CV(train_x, train_y, inner_k, model)['test']
+            shuffled_x, shuffled_y = shuffle_dataset(train_x, train_y)
+            scores = k_fold_CV(shuffled_x, shuffled_y, inner_k, model)['test']
             overall_score = 0.0
             for s in scores:
                 overall_score += getattr(s, metric)
